@@ -1,0 +1,208 @@
+
+#install.packages("stringr")
+
+
+library(readxl)
+library(openxlsx)
+library(stringr)  # Load the stringr package
+
+### We need to make a function based on the inputs needs to be injected to generate values for the OUTPUT file. 
+### The "process_input" is the function prepared for this. 
+### This function is based on "input_file, sheet_name, coder_name, fqhc_name". 
+### 1st two input files coming from excel file and sheet name of the file, last two will be Coder Name (Reviewed By) and FQHC name. All of the input names needs to be written to get the output.
+### One excel name, sheet name, coder name and fqhc name input will give calculate 11 attributes and make a dataframe.
+### You Don't need to write anything within the function lines 
+
+# Function to process input data and create results dataframe
+process_input <- function(input_file, sheet_name, coder_name, fqhc_name) {
+  
+  # List of desired text attributes to count and new rows of countings features
+  attrib <- c("No Changes", "Addition", "Deletion", "Duplicate", "Alteration", "Audit Changes", "Audio Only")
+  
+  # Count for REVIEWS
+  review_attrib <- c("Addition", "Deletion", "Alteration")
+  
+  # Arrange the Excel Items Column
+  table_rows <- c("Charts Reviewed", "Charts Impacted", "Chart Impacted %", "No Changes", "Addition", "Deletion", "Duplicate", "Alteration", "Audit Changes", "Audio Only")
+  
+  
+  #Setting the input directory for default. 
+  
+  setwd(input_folder)
+  
+  # Read data from Excel
+  dataBT <- read_excel(input_file, sheet = sheet_name)
+  
+  ###################################################
+  # Rename COLUMN NAME of C3 Recommendation and Member ID
+  #colnames(dataBT)[8] <- "c3recom"
+  #dataBT <- dataBT[-3,]
+  #colnames(dataBT)[2] <- "MemberID"
+  
+  colnames(dataBT)[colnames(dataBT) == "C3 Recommendation"] <- "c3recom"
+  dataBT <- dataBT[-3,]
+  colnames(dataBT)[2] <- "MemberID"
+  
+  
+  
+  # Rename C3 Recommendation and Member ID columns
+  #dataBT$c3recom <- dataBT[, "C3 Recommendation"]  # Replace "C3 Recommendation" with the actual column name
+  #dataBT <- dataBT[-3,]
+  #dataBT$MemberID <- dataBT[, "Member ID"]  # Replace "Member ID" with the actual column name
+  
+  ###################################################
+  
+  
+  # Extract the column with text attributes
+  c3recomm <- dataBT$c3recom
+  unique_member_ids <- dataBT$MemberID
+  
+  
+  # Initialize empty vectors/variables
+  counts <- numeric(length(attrib))
+  count_impact <- 0
+  members_with_change <- 0
+  
+  # Loop through each desired text attribute and count occurrences. This will count the occurrance of the attributes as mentioned earlier.
+  # The loop will generate the number of counts by all the attributes- "No Changes", "Addition", "Deletion", "Duplicate", "Alteration", "Audit Changes", "Audio Only"
+  # Also generate the total Chart Reviews counting the number under C3 Recommendation
+  
+  for (i in seq_along(attrib)) {
+    counter_attrib <- attrib[i]
+    
+    # Combine "No Changes" and "No change" under "No Changes" label
+    if (counter_attrib == "No Changes" || counter_attrib == "No change") {
+      counts[i] <- sum(c3recomm %in% c("No Changes", "No change"), na.rm = TRUE)
+    } else {
+      counts[i] <- sum(c3recomm == counter_attrib, na.rm = TRUE)
+    }
+    total_review <- sum(counts)
+    
+    # Count of the specific attribute. That means number of attributes- "Addition", "Deletion", "Alteration" linking with "review_attrib" as defined earlier (except the N/A cells)
+    if (counter_attrib %in% review_attrib) {
+      count_impact <- count_impact + counts[i]
+    }
+    
+    # Calculate percentage of certain attributes. Calculate the % of Chart Impacted from count_impact and total_review.
+    chart_impacted <- (count_impact / total_review) * 100
+    
+  }
+  
+  
+  ## Count unique Member IDs with changes. 
+  ## IF the Member ID is unique then it will count number of "addition", "deletion" and "alteration". 
+  ## The entire line of code is calculating the count of unique Member IDs that have recommendations falling within the types specified in review_attrib (i.e., "Addition", "Deletion", or "Alteration"). 
+  ## This count represents the number of members who have undergone changes that require review.
+  
+  #members_with_change <- length(unique_member_ids[c3recomm %in% review_attrib])
+  
+  # Check if any Member ID is duplicated more than once. Will report only the Member ID for first time. For duplicate Member ID won't count.
+  
+  if (any(duplicated(unique_member_ids))) {
+    unique_member_ids_with_changes <- unique_member_ids[c3recomm %in% review_attrib]
+    members_with_change <- length(unique_member_ids_with_changes[!duplicated(unique_member_ids_with_changes)])
+  }
+  
+  # Combine all counts and percentages
+  combined_counts <- c(total_review, count_impact, chart_impacted, counts)
+  
+  # Create a data frame to store results with new row names
+  results_df <- data.frame(Items = table_rows, July = combined_counts)
+  
+  # Remove selected attribute rows from results_df
+  attrib_remove <- c("No Changes", "Duplicate", "Audit Changes", "Audio Only")  # Specify attributes to remove
+  results_df <- results_df[!results_df$Items %in% attrib_remove, ]
+  
+  # Add 'Members With Change' row
+  results_df <- rbind(results_df, data.frame(Items = "Members With Change", July = members_with_change))
+  
+  
+  # Add 'Total Changes' row by summing "Addition", "Deletion", "Alteration" rows
+  total_changes <- sum(results_df[results_df$Items %in% review_attrib, "July"])
+  results_df <- rbind(results_df, data.frame(Items = "Total Changes", July = total_changes))
+  
+  # Calculate percentages of Three Attributes- "Deletion", "Addition", "Alteration" and add the rows
+  percentages <- c("Deletion", "Addition", "Alteration")
+  
+  for (perc_item in percentages) {
+    perc_value <- (results_df[results_df$Items == perc_item, "July"] / total_changes) * 100
+    results_df <- rbind(results_df, data.frame(Items = paste("ICD10", perc_item, "%"), July = perc_value))
+  }
+  
+  
+  # Define the desired order of items
+  desired_order <- c("Charts Reviewed", "Charts Impacted", "Chart Impacted %", "Members With Change", "Total Changes", "Deletion", "ICD10 Deletion %", "Addition", "ICD10 Addition %", "Alteration", "ICD10 Alteration %")
+  
+  # Rearrange the ITEMS according to the desired order
+  results_df <- results_df[match(desired_order, results_df$Items), ]
+  
+  # Add columns "Coder Name" and "FQHC" with specified values
+  results_df <- data.frame("Coder Name" = coder_name, "FQHC" = fqhc_name, results_df)
+  
+  return(results_df)
+}
+
+
+
+###############################################################################
+
+
+# Main code
+input_folder <- "D:\\Works\\7th_EXCEL_R\\r code\\input files\\"
+output_folder <- "D:\\Works\\7th_EXCEL_R\\r code\\output\\"
+output_file <- paste0(output_folder, "output_final_x.xlsx")
+
+# Get a list of all Excel files in the input folder
+input_files <- list.files(input_folder, pattern = "\\.xlsx$", full.names = TRUE)
+
+# Initialize an empty list to store results dataframes
+results_list <- list()
+
+# Loop through each input file
+for (input_file in input_files) {
+  file_name <- tools::file_path_sans_ext(basename(input_file))
+  
+  # Split the file name by underscores
+  file_name_parts <- str_split(file_name, "_")[[1]]
+  
+  # Extract the last part as coder_name
+  coder_name <- tail(file_name_parts, 1)
+  
+  # Extract the first part as fqhc_name
+  fqhc_name <- head(file_name_parts, 1)
+  
+  # Read the input Excel file to get the sheet names
+  sheet_names <- excel_sheets(input_file)
+  
+  # Initialize an empty list to store results dataframes for each sheet in the current file
+  file_results_list <- list()
+  
+  # Loop through each sheet in the input file
+  for (sheet_name in sheet_names) {
+    # Process the input file and sheet, and store the results in the list
+    results <- process_input(input_file, sheet_name, coder_name, fqhc_name)
+    
+    # Add a new column for sheet name and set its value
+    results$SheetName <- sheet_name
+    
+    file_results_list[[sheet_name]] <- results
+  }
+  
+  # Store the results dataframes for each sheet in the main results list
+  results_list[[file_name]] <- file_results_list
+}
+
+# Combine all results dataframes
+combined_results_list <- lapply(results_list, function(file_results) {
+  do.call(rbind, file_results)
+})
+
+results_df_all <- do.call(rbind, combined_results_list)
+
+# Write combined results to an Excel file
+wb <- createWorkbook()
+addWorksheet(wb, "Combined Results")
+writeData(wb, sheet = "Combined Results", x = results_df_all)
+saveWorkbook(wb, overwrite=TRUE, output_file)
+
+#This will give final output in excel files in the output folder
